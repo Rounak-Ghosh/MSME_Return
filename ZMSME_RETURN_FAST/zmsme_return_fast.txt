@@ -1,0 +1,39 @@
+*&---------------------------------------------------------------------*
+*& Report ZMSME_RETURN_FAST
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT zmsme_return_fast.
+
+INCLUDE zmsme_return_top.
+INCLUDE zmsme_return_sel.
+
+START-OF-SELECTION.
+
+  BREAK-POINT.
+  IF s_lifnr-low EQ '*'.
+    lv_optimise = 'X'.
+    MOVE s_lifnr[] to s_lifnr1[].
+    DO 26 TIMES.
+      REFRESH: s_lifnr[], it_final, it_info.
+
+      lv_ascii = 64 + sy-index.
+      cl_abap_conv_in_ce=>create( encoding = 'UTF-8' )->convert( EXPORTING input = lv_ascii
+                                                                 IMPORTING data  = lv_char ).
+      s_lifnr-sign = 'I'.
+      s_lifnr-option = 'CP'.
+      CONCATENATE lv_char '*' INTO s_lifnr-low.
+      APPEND s_lifnr TO s_lifnr.
+
+      INCLUDE zmsme_return_logic_efficient.
+    ENDDO.
+
+  ELSE.
+    SUBMIT zmsme_return
+            WITH p_budat EQ p_budat
+            WITH p_bukrs EQ p_bukrs
+            WITH p_rate  EQ p_rate
+            WITH p_segm  EQ p_segm
+            WITH s_budat EQ s_budat
+            WITH s_lifnr EQ s_lifnr.
+  ENDIF.

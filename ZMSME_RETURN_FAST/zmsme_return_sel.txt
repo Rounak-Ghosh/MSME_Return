@@ -1,0 +1,19 @@
+*&---------------------------------------------------------------------*
+*& Include          ZMSME_RETURN_SEL
+*&---------------------------------------------------------------------*
+
+SELECTION-SCREEN BEGIN OF BLOCK blk WITH FRAME.
+  PARAMETERS: p_bukrs TYPE bukrs DEFAULT 'R001' OBLIGATORY,
+              p_segm  TYPE fb_segment,
+              p_rate  TYPE char10 DEFAULT '0'.
+  SELECT-OPTIONS: s_lifnr FOR lfa1-lifnr,
+                  s_lifnr1 FOR lfa1-lifnr NO-DISPLAY,
+                  s_budat FOR bkpf-budat NO-DISPLAY.
+  PARAMETERS: p_budat TYPE bkpf-budat DEFAULT sy-datum OBLIGATORY.
+SELECTION-SCREEN END OF BLOCK blk.
+
+s_budat-sign = 'I'.
+s_budat-option = 'BT'.
+s_budat-low = '00000000'.
+s_budat-high = p_budat.
+APPEND s_budat TO s_budat.

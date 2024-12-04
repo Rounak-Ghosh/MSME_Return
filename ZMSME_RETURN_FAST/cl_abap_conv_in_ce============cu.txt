@@ -1,0 +1,126 @@
+class CL_ABAP_CONV_IN_CE definition
+  public
+  create private
+
+  global friends CL_NLS_STRUC_CONTAINER
+                 CL_NLS_STRUC_CONTAINER_SNAME .
+
+*"* public components of class CL_ABAP_CONV_IN_CE
+*"* do not include other source files here!!!
+public section.
+
+  data ENCODING type ABAP_ENCODING read-only .
+  data ENDIAN type ABAP_ENDIAN read-only .
+  data IGNORE_CERR type ABAP_BOOL read-only .
+  data IS_AT_END type ABAP_BOOL read-only .
+  data POSITION type I read-only .
+  data REPLACEMENT type ABAP_REPL read-only .
+
+  class-methods CREATE
+    importing
+      !ENCODING type ABAP_ENCODING default 'DEFAULT'
+      !ENDIAN type ABAP_ENDIAN optional
+      !REPLACEMENT type ABAP_REPL default '#'
+      !IGNORE_CERR type ABAP_BOOL default ABAP_FALSE
+      !INPUT type XSEQUENCE optional
+    returning
+      value(CONV) type ref to CL_ABAP_CONV_IN_CE
+    raising
+      CX_PARAMETER_INVALID_RANGE
+      CX_SY_CODEPAGE_CONVERTER_INIT .
+  class-methods UCCP
+    importing
+      !UCCP type SIMPLE
+    returning
+      value(CHAR) type SYCHAR02
+    raising
+      CX_SY_CONVERSION_CODEPAGE
+      CX_PARAMETER_INVALID_TYPE
+      CX_SY_CODEPAGE_CONVERTER_INIT .
+  class-methods UCCPI
+    importing
+      !UCCP type I
+    returning
+      value(CHAR) type SYCHAR02
+    raising
+      CX_SY_CONVERSION_CODEPAGE
+      CX_PARAMETER_INVALID_RANGE
+      CX_SY_CODEPAGE_CONVERTER_INIT .
+  methods CONVERT
+    importing
+      !INPUT type XSEQUENCE
+      !N type I default -1
+    exporting
+      !DATA type SIMPLE
+      !LEN type I
+      !INPUT_TOO_SHORT type ABAP_BOOL
+    raising
+      CX_SY_CONVERSION_CODEPAGE
+      CX_SY_CODEPAGE_CONVERTER_INIT
+      CX_PARAMETER_INVALID_TYPE .
+  methods CONVERT_STRUC
+    importing
+      !INPUT type XSEQUENCE
+      !VIEW type ref to CL_ABAP_VIEW_OFFLEN
+    exporting
+      !DATA type ANY
+      !INPUT_TOO_SHORT type ABAP_BOOL
+    raising
+      CX_SY_CONVERSION_CODEPAGE
+      CX_SY_CODEPAGE_CONVERTER_INIT
+      CX_PARAMETER_INVALID_TYPE
+      CX_PARAMETER_INVALID_RANGE .
+  methods GET_BUFFER
+    returning
+      value(BUFFER) type XSTRING .
+  methods READ
+    importing
+      !N type I default -1
+      !VIEW type ref to CL_ABAP_VIEW_OFFLEN optional
+    exporting
+      !DATA type ANY
+      !LEN type I
+    raising
+      CX_SY_CONVERSION_CODEPAGE
+      CX_SY_CODEPAGE_CONVERTER_INIT
+      CX_PARAMETER_INVALID_TYPE
+      CX_PARAMETER_INVALID_RANGE .
+  methods READ_STRUC
+    importing
+      !VIEW type ref to CL_ABAP_VIEW_OFFLEN
+    exporting
+      !DATA type ANY
+      !LEN type I
+    raising
+      CX_SY_CONVERSION_CODEPAGE
+      CX_SY_CODEPAGE_CONVERTER_INIT
+      CX_PARAMETER_INVALID_TYPE
+      CX_PARAMETER_INVALID_RANGE .
+  methods RESET
+    importing
+      !ENCODING type ABAP_ENCODING optional
+      !ENDIAN type ABAP_ENDIAN default 'X'
+      !IGNORE_CERR type ABAP_BOOL default ABAP_UNDEFINED
+      !INPUT type XSEQUENCE
+    raising
+      CX_PARAMETER_INVALID_RANGE
+      CX_SY_CODEPAGE_CONVERTER_INIT .
+  methods SET_REPLACEMENT
+    importing
+      !REPLACEMENT type ABAP_REPL
+    raising
+      CX_SY_CODEPAGE_CONVERTER_INIT .
+  methods SKIP_C
+    importing
+      !N type I default 1
+    exporting
+      !LEN type I
+    raising
+      CX_PARAMETER_INVALID_RANGE
+      CX_SY_CONVERSION_CODEPAGE
+      CX_SY_CODEPAGE_CONVERTER_INIT .
+  methods SKIP_X
+    importing
+      !N type I default 1
+    exporting
+      !LEN type I .

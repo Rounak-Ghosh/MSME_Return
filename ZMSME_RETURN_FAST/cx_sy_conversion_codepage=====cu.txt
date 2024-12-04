@@ -1,0 +1,23 @@
+class CX_SY_CONVERSION_CODEPAGE definition
+  public
+  inheriting from CX_SY_CONVERSION_ERROR
+  final
+  create public .
+
+public section.
+
+  constants CX_SY_CONVERSION_CODEPAGE type SOTR_CONC value '005056A207C81ED495A86D43568A4980' ##NO_TEXT.
+  data SOURCE_EXTRACT type XSTRING .
+  data SOURCE_EXTRACT_TEXT type STRING .
+
+  methods CONSTRUCTOR
+    importing
+      !TEXTID like TEXTID optional
+      !PREVIOUS like PREVIOUS optional
+      !SOURCE_EXTRACT type XSTRING optional
+      !SOURCE_EXTRACT_TEXT type STRING optional .
+
+  methods IF_MESSAGE~GET_LONGTEXT
+    redefinition .
+  methods IF_MESSAGE~GET_TEXT
+    redefinition .

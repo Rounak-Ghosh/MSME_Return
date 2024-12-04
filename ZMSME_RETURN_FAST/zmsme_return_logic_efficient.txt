@@ -1,0 +1,831 @@
+*&---------------------------------------------------------------------*
+*& Include          ZMSME_RETURN_LOGIC_EFFICIENT
+*&---------------------------------------------------------------------*
+
+  SELECT *
+      FROM lfa1
+      LEFT OUTER JOIN lfb1 ON lfa1~lifnr = lfb1~lifnr
+      INTO CORRESPONDING FIELDS OF TABLE @it_info
+      WHERE lfb1~mindk IN ( 'MIC', 'MSE', 'SMA' )
+      AND lfb1~bukrs EQ @p_bukrs
+      AND lfa1~lifnr IN @s_lifnr.
+
+  CALL FUNCTION 'BAPI_COMPANYCODE_GET_PERIOD'
+    EXPORTING
+      companycodeid = 'R001'
+      posting_date  = s_budat-high
+    IMPORTING
+      fiscal_year   = lv_fiscal_year.
+
+  IF ( lv_fiscal_year MOD 4 = 0 ) AND ( lv_fiscal_year MOD 100 <> 0 OR lv_fiscal_year MOD 400 = 0 ).
+    lv_days_interest = '366'.
+  ELSE.
+    lv_days_interest = '365'.
+  ENDIF.
+
+  IF p_budat+4(4) GE '0401' AND p_budat+4(4) LE '0930'.
+    CONCATENATE lv_fiscal_year '0401' INTO lv_low.
+    CONCATENATE lv_fiscal_year '0930' INTO lv_high.
+  ELSE.
+    CONCATENATE lv_fiscal_year '1001' INTO lv_low.
+    lv_fiscal_year += 1.
+    CONCATENATE lv_fiscal_year '0331' INTO lv_high.
+  ENDIF.
+
+  IF it_info IS NOT INITIAL.
+    SUBMIT zfbl1n
+            WITH kd_bukrs EQ p_bukrs
+            WITH kd_iarch EQ 'X'
+            WITH kd_lifnr IN s_lifnr
+            WITH kd_memor EQ 'X'
+            WITH kd_noaut EQ 'X'
+            WITH kd_nooap EQ 'X'
+            WITH kd_objec EQ 'FI_DOCUMNT'
+            WITH kd_opopt EQ 'X'
+            WITH kd_stida EQ '20240331'
+            WITH kd_usedb EQ 'X'
+            WITH pa_stida EQ '20240331'
+            WITH x_norm   EQ 'X'
+            WITH x_opsel  EQ 'X'
+            WITH x_shbv   EQ 'X'
+            AND RETURN.
+
+    IMPORT it_pos = it_pos FROM MEMORY ID 'ZFBL1N'.
+    DELETE it_pos WHERE bupla EQ 'KFOT'.
+
+*   Contains all open items on 01.04.202X or 01.10.202X
+    it_pos_items = CORRESPONDING #( it_pos ).
+
+    SUBMIT zfbl1n
+              WITH kd_bukrs EQ p_bukrs
+              WITH kd_lifnr IN s_lifnr
+              WITH kd_noaut EQ 'X'
+              WITH kd_nooap EQ 'X'
+              WITH kd_apopt EQ 'X'
+              WITH kd_objec EQ 'FI_DOCUMNT'
+              WITH kd_opopt EQ 'X'
+              WITH kd_stida EQ '99991231'
+              WITH kd_usedb EQ 'X'
+              WITH kd_iarch EQ 'X'
+              WITH kd_memor EQ 'X'
+              WITH so_budat IN s_budat
+              WITH x_aisel  EQ 'X'
+              WITH x_norm   EQ 'X'
+              WITH x_shbv   EQ 'X'
+              AND RETURN.
+
+*   Contains all items - open + cleared upto ason date
+    IMPORT it_pos = it_pos FROM MEMORY ID 'ZFBL1N'.
+    DELETE it_pos WHERE bupla EQ 'KFOT'.
+
+*   Contains all open KZ & KG docs that help knock off open RE
+    it_pos_open = CORRESPONDING #( it_pos ).
+    DELETE it_pos_open WHERE ( blart NE 'KZ' AND blart NE 'KG' ).
+    DELETE it_pos_open WHERE sym_augp NE 'U'.
+
+*   Keeping only cleared items for date range
+    DELETE it_pos WHERE sym_augp EQ 'U'.
+    IF p_budat+4(4) GE '0401' AND p_budat+4(4) LE '0930'.
+      DELETE it_pos WHERE ( budat LT lv_low OR budat GT lv_high ).
+    ELSE.
+      DELETE it_pos WHERE ( budat LT lv_low OR budat GT lv_high ).
+    ENDIF.
+
+    DELETE it_pos WHERE blart NE 'RE' AND blart NE 'KR' AND blart NE 'KA'.
+    DELETE it_pos_items WHERE blart NE 'RE' AND blart NE 'KR' AND blart NE 'KA'.
+
+    LOOP AT it_pos_items INTO wa_pos_items.
+      APPEND wa_pos_items TO it_pos.
+      CLEAR wa_pos_items.
+    ENDLOOP.
+
+    DELETE it_pos WHERE gjahr EQ '2022' OR bupla EQ 'KFOT'.
+    SORT it_pos BY belnr bschl blart budat gjahr.
+    DELETE ADJACENT DUPLICATES FROM it_pos COMPARING belnr bschl blart budat gjahr.
+
+  ENDIF.
+
+  LOOP AT it_pos INTO wa_pos WHERE blart EQ 'KA' OR blart EQ 'RE'.
+    SELECT SINGLE stblg
+          FROM bkpf
+          INTO @DATA(is_rev)
+          WHERE bukrs EQ @p_bukrs
+          AND gjahr EQ @wa_pos-gjahr
+          AND belnr EQ @wa_pos-belnr.
+    SELECT SINGLE xreversed
+          FROM bkpf
+          INTO @DATA(is_rev1)
+          WHERE bukrs EQ @p_bukrs
+          AND gjahr EQ @wa_pos-gjahr
+          AND belnr EQ @wa_pos-belnr.
+    SELECT SINGLE xreversing
+          FROM bkpf
+          INTO @DATA(is_rev2)
+          WHERE bukrs EQ @p_bukrs
+          AND gjahr EQ @wa_pos-gjahr
+          AND belnr EQ @wa_pos-belnr.
+    IF is_rev IS NOT INITIAL OR is_rev1 IS NOT INITIAL OR is_rev2 IS NOT INITIAL.
+      DELETE it_pos WHERE belnr EQ wa_pos-belnr.
+    ENDIF.
+    CLEAR: is_rev, is_rev1, is_rev2.
+  ENDLOOP.
+
+  SORT it_pos BY budat bldat.
+
+
+
+  LOOP AT it_info INTO wa_info.
+    LOOP AT it_pos INTO wa_pos WHERE konto = wa_info-lifnr.
+      CLEAR wa_final.
+
+      wa_final = CORRESPONDING #( wa_info ).
+      wa_final-bupla = wa_pos-bupla.
+      wa_final-belnr = wa_pos-xblnr.
+      wa_final-doc_type = wa_pos-blart.
+      wa_final-tds_amt = wa_pos-qbshb.
+
+      IF wa_pos-blart EQ 'RE' AND wa_pos-belnr IS NOT INITIAL.
+        SELECT SINGLE awref aworg
+          FROM acdoca
+          INTO ( wa_final-miro_no, lv_miro_yr )
+          WHERE belnr EQ wa_pos-belnr
+          AND gjahr EQ wa_pos-gjahr
+          AND rbukrs EQ p_bukrs.
+        IF sy-subrc EQ 0.
+          SELECT tsl
+            FROM acdoca
+            INTO TABLE @DATA(it_adj_amt)
+            WHERE belnr EQ @wa_pos-belnr
+            AND rbukrs EQ @p_bukrs
+            AND gjahr EQ @lv_miro_yr
+            AND bschl EQ '50'
+            AND linetype EQ '20000'.
+          IF sy-subrc EQ 0.
+            LOOP AT it_adj_amt ASSIGNING FIELD-SYMBOL(<fs_adj>).
+              lv_gl_amt += <fs_adj>-tsl.
+            ENDLOOP.
+            UNASSIGN <fs_adj>.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+
+      IF wa_final-miro_no IS NOT INITIAL.
+        SELECT r~lfbnr, r~lfgja, r~wrbtr, r~belnr, m~budat
+          FROM rseg AS r
+          INNER JOIN mkpf AS m
+          ON r~lfbnr = m~mblnr
+          AND r~lfgja = m~mjahr
+          INTO TABLE @DATA(it_migo_nos)
+          WHERE r~belnr EQ @wa_final-miro_no
+          AND r~gjahr EQ @lv_miro_yr
+          AND r~bukrs EQ @p_bukrs
+          ORDER BY m~budat.
+
+        IF sy-subrc EQ 4.
+          SELECT r~lfbnr, r~lfgja, r~wrbtr, r~belnr, m~budat
+            FROM rseg AS r
+            INNER JOIN ekbe AS e
+            ON r~lfbnr = e~lfbnr
+            AND r~lfgja = e~lfgja
+            AND bewtp EQ 'E'
+            AND bwart EQ '101'
+            INNER JOIN mkpf AS m
+            ON e~belnr = m~mblnr
+            AND e~gjahr = m~mjahr
+            INTO TABLE @it_migo_nos
+            WHERE r~belnr EQ @wa_final-miro_no
+            AND r~gjahr EQ @lv_miro_yr
+            AND r~bukrs EQ @p_bukrs
+            ORDER BY m~budat.
+        ENDIF.
+      ENDIF.
+
+*>>> pursing multiple lines of migo
+
+      DELETE ADJACENT DUPLICATES FROM it_migo_nos COMPARING lfbnr wrbtr.  "belnr
+      DESCRIBE TABLE it_migo_nos LINES DATA(lv_lines).
+      CLEAR lv_counter.
+      IF lv_lines GT 1.
+        LOOP AT it_migo_nos INTO DATA(wa_migo_nos).
+          lv_counter += 1.
+          IF wa_pos-augbl IS NOT INITIAL.       "cleared - full payment done = PAID
+            wa_final-pay_status = 'PAID'.
+          ELSE.                                 "not cleared - maybe / maybe not  full payment done
+            wa_final-pay_status = 'DUE'.
+          ENDIF.
+          wa_final-doc_type = wa_pos-blart.
+          wa_final-migo_doc_no = wa_migo_nos-lfbnr.
+          wa_final-migo_amt = wa_migo_nos-wrbtr.
+
+          IF wa_migo_nos-lfbnr IS NOT INITIAL.
+            SELECT SINGLE budat cpudt
+              FROM mkpf
+              INTO ( wa_final-migo_date, wa_final-migo_entry )
+              WHERE mblnr EQ wa_migo_nos-lfbnr
+              AND mjahr EQ wa_migo_nos-lfgja.
+            IF sy-subrc EQ 4 AND wa_final-doc_type NE 'KR' AND wa_final-doc_type NE 'KA'.
+              IF wa_migo_nos-lfbnr IS NOT INITIAL.
+                SELECT SINGLE belnr
+                  FROM ekbe
+                  INTO wa_final-migo_doc_no
+                  WHERE lfbnr EQ wa_migo_nos-lfbnr
+                  AND lfgja EQ wa_migo_nos-lfgja
+                  AND bewtp EQ 'E'
+                  AND bwart EQ '101'.
+                SELECT SINGLE budat cpudt
+                  FROM mkpf
+                  INTO ( wa_final-migo_date, wa_final-migo_entry )
+                  WHERE mblnr EQ wa_final-migo_doc_no
+                  AND mjahr EQ wa_migo_nos-lfgja.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+
+          wa_final-fi_doc_no = |{ wa_pos-belnr ALPHA = OUT }|.
+          IF wa_pos-augbl IS NOT INITIAL.
+            wa_final-pay_doc_no = wa_pos-augbl.
+            wa_final-pay_date = wa_pos-augdt.
+          ENDIF.
+
+          IF wa_pos-belnr IS NOT INITIAL.
+            SELECT SINGLE bldat budat cpudt
+              FROM bkpf
+              INTO ( wa_final-miro_date, wa_final-miro_post, wa_final-miro_entry )
+              WHERE belnr EQ wa_pos-belnr
+              AND xblnr EQ wa_pos-xblnr
+              AND bukrs EQ p_bukrs
+              AND gjahr EQ lv_miro_yr.
+          ENDIF.
+
+*>>>>>>>>>>>>>>>>>> NO OF DAYS CALC >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+          IF wa_pos-augdt IS NOT INITIAL.         "PAID
+            IF wa_final-migo_date IS NOT INITIAL.
+              wa_final-no_day = wa_pos-augdt - wa_final-migo_date.
+            ENDIF.
+          ELSE.                                   "DUE
+            IF lv_gl_amt EQ 0.
+              IF wa_final-migo_date IS NOT INITIAL.
+                wa_final-no_day = p_budat - wa_final-migo_date.
+              ENDIF.
+            ELSE.
+              wa_final-no_day = p_budat - wa_final-migo_date.
+            ENDIF.
+          ENDIF.
+*>>>>>>>>>>>>>>>>>> NO OF DAYS CALC >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+          IF wa_final-no_day GT 45.
+            lv_principle = wa_final-migo_amt.
+
+*>>>>>>>>>>>>>>>>>> GL CLEARING ADJUSTMENT >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            IF abs( lv_gl_amt ) GT 0.
+              IF abs( lv_gl_amt ) GT lv_principle.
+                lv_gl_amt = abs( lv_gl_amt ) - lv_principle.
+                wa_final-adj_amt = lv_principle.
+                wa_final-no_day = 0.
+                lv_principle = 0.
+                wa_final-adj_ind = 'X'.
+              ELSE.
+                lv_principle -= abs( lv_gl_amt ).
+                wa_final-adj_amt = abs( lv_gl_amt ).
+                lv_gl_amt = 0.
+              ENDIF.
+            ENDIF.
+*>>>>>>>>>>>>>>>>>> GL CLEARING ADJUSTMENT >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+            lv_rate = p_rate / 100.
+            lv_time = ( wa_final-no_day - 45 ) / lv_days_interest.
+            wa_final-interest = ( lv_principle * lv_rate *  lv_time ).
+            wa_final-principle_amt = lv_principle.
+          ELSE.
+            wa_final-principle_amt = '0'.
+            wa_final-interest = '0'.
+          ENDIF.
+
+          IF lv_counter NE lv_lines.
+            APPEND wa_final TO it_final.
+            CLEAR wa_final.
+            wa_final = CORRESPONDING #( wa_info ).
+            wa_final-bupla = wa_pos-bupla.
+            wa_final-belnr = wa_pos-xblnr.
+          ELSE.
+            wa_final-invoice_amt = wa_pos-bwwrt + wa_pos-qbshb.
+
+          ENDIF.
+
+          IF wa_pos-augbl IS NOT INITIAL.
+            wa_final-pay_doc_no = wa_pos-augbl.
+            wa_final-pay_date = wa_pos-augdt.
+          ENDIF.
+
+        ENDLOOP.
+
+      ELSE.
+
+        wa_final-invoice_amt = wa_pos-bwwrt + wa_pos-qbshb.
+
+        READ TABLE it_migo_nos INTO wa_migo_nos INDEX 1.
+        wa_final-migo_doc_no = wa_migo_nos-lfbnr.
+        wa_final-migo_amt = wa_migo_nos-wrbtr.
+        IF wa_migo_nos-lfbnr IS NOT INITIAL.
+          SELECT SINGLE budat cpudt
+              FROM mkpf
+              INTO ( wa_final-migo_date, wa_final-migo_entry )
+              WHERE mblnr EQ wa_migo_nos-lfbnr
+              AND mjahr EQ wa_migo_nos-lfgja.
+        ENDIF.
+        IF sy-subrc EQ 4  AND wa_final-doc_type NE 'KR' AND wa_final-doc_type NE 'KG' AND wa_final-doc_type NE 'KA'.
+          IF wa_migo_nos-lfbnr IS NOT INITIAL.
+            SELECT SINGLE belnr
+              FROM ekbe
+              INTO wa_final-migo_doc_no
+              WHERE lfbnr EQ wa_migo_nos-lfbnr
+              AND lfgja EQ wa_migo_nos-lfgja
+              AND bewtp EQ 'E'
+              AND bwart EQ '101'.
+            SELECT SINGLE budat cpudt
+              FROM mkpf
+              INTO ( wa_final-migo_date, wa_final-migo_entry )
+              WHERE mblnr EQ wa_final-migo_doc_no
+              AND mjahr EQ wa_migo_nos-lfgja.
+          ENDIF.
+        ENDIF.
+
+      ENDIF.
+
+*>>> pursing multiple lines of migo
+
+      IF wa_final-migo_doc_no IS NOT INITIAL.
+        SELECT SINGLE budat cpudt
+          FROM mkpf
+          INTO ( wa_final-migo_date, wa_final-migo_entry )
+          WHERE mblnr EQ wa_final-migo_doc_no
+          AND mjahr EQ wa_migo_nos-lfgja.
+      ENDIF.
+      IF sy-subrc EQ 4  AND wa_final-doc_type NE 'KR' AND wa_final-doc_type NE 'KG' AND wa_final-doc_type NE 'KA'.
+        IF wa_migo_nos-lfbnr IS NOT INITIAL.
+          SELECT SINGLE belnr
+            FROM ekbe
+            INTO wa_final-migo_doc_no
+            WHERE lfbnr EQ wa_migo_nos-lfbnr
+            AND lfgja EQ wa_migo_nos-lfgja
+            AND bewtp EQ 'E'
+            AND bwart EQ '101'.
+          SELECT SINGLE budat cpudt
+            FROM mkpf
+            INTO ( wa_final-migo_date, wa_final-migo_entry )
+            WHERE mblnr EQ wa_final-migo_doc_no
+            AND mjahr EQ wa_migo_nos-lfgja.
+        ENDIF.
+      ENDIF.
+
+      wa_final-fi_doc_no = |{ wa_pos-belnr ALPHA = OUT }|.
+
+      IF wa_pos-belnr IS NOT INITIAL.
+        SELECT SINGLE bldat budat cpudt
+          FROM bkpf
+          INTO ( wa_final-miro_date, wa_final-miro_post, wa_final-miro_entry )
+          WHERE belnr EQ wa_pos-belnr
+          AND xblnr EQ wa_pos-xblnr
+          AND bukrs EQ p_bukrs
+          AND gjahr EQ wa_pos-gjahr.
+      ENDIF.
+
+      IF wa_pos-augbl IS NOT INITIAL.
+        wa_final-pay_doc_no = wa_pos-augbl.
+        wa_final-pay_date = wa_pos-augdt.
+      ENDIF.
+
+      IF wa_pos-augbl IS NOT INITIAL.
+        wa_final-pay_status = 'PAID'.
+      ELSE.
+        wa_final-pay_status = 'DUE'.
+      ENDIF.
+
+      IF wa_final-belnr IS NOT INITIAL.
+        IF wa_migo_nos-lfbnr IS NOT INITIAL.
+          SELECT belnr, budat, dmbtr
+            FROM bsak_view
+            INTO TABLE @DATA(it_multi_pymt)
+            WHERE lifnr EQ @wa_final-lifnr
+            AND bukrs EQ @p_bukrs
+            AND gjahr EQ @wa_migo_nos-lfgja
+            AND xblnr EQ @wa_final-belnr
+            AND blart IN ( 'KZ', 'KR' ).
+        ENDIF.
+      ENDIF.
+      DESCRIBE TABLE it_multi_pymt LINES DATA(lv_pymt_count).
+
+*>>>>>>>>>>>>>>>>>> PAYMENT DETAILS >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      IF lv_pymt_count LE 1.
+
+        IF wa_final-doc_type EQ 'KG' OR wa_final-doc_type EQ 'CN'.
+          wa_final-adj_amt = wa_pos-bwwrt.
+        ELSE.
+          IF wa_pos-augbl IS NOT INITIAL.       "cleared - full payment done = PAID
+            wa_final-pay_amt = wa_pos-bwwrt.
+            wa_final-pay_doc_no = wa_pos-augbl.
+            wa_final-pay_date = wa_pos-augdt.
+            IF wa_pos-belnr IS NOT INITIAL.
+              SELECT SINGLE xtruerev
+                FROM acdoca
+                INTO @DATA(lv_rev)
+                WHERE rbukrs EQ @p_bukrs
+                AND gjahr EQ @wa_pos-gjahr
+                AND belnr EQ @wa_pos-belnr.
+            ENDIF.
+            IF lv_rev EQ 'X'.
+              wa_final-pay_status = 'REVERSED'.
+            ELSE.
+              wa_final-pay_status = 'PAID'.
+            ENDIF.
+          ELSE.                                 "not cleared - maybe / maybe not full payment done
+            wa_final-pay_status = 'DUE'.
+            lv_rem_amt = wa_final-invoice_amt.
+          ENDIF.
+        ENDIF.
+
+*>>>>>>>>>>>>>>>>>> NO OF DAYS CALC >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        IF wa_pos-augbl IS NOT INITIAL.                 "PAID
+          IF wa_final-migo_date IS NOT INITIAL.
+            wa_final-no_day = wa_pos-augdt - wa_final-migo_date.
+          ELSE.
+            wa_final-no_day = wa_pos-augdt - wa_final-miro_date.
+          ENDIF.
+        ELSE.                                           "DUE
+          IF lv_gl_amt EQ 0.
+            IF wa_final-migo_date IS NOT INITIAL.
+              wa_final-no_day = p_budat - wa_final-migo_date.
+            ELSE.
+              wa_final-no_day = p_budat - wa_final-miro_date.
+            ENDIF.
+          ELSE.
+            wa_final-no_day = p_budat - wa_final-migo_date.
+          ENDIF.
+        ENDIF.
+*>>>>>>>>>>>>>>>>>> NO OF DAYS CALC >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+*>>>>>>>>>>>>>>>>>> INTEREST CALC >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        IF wa_final-no_day GT 45.
+          IF wa_final-doc_type EQ 'KR' OR wa_final-doc_type EQ 'KG'.
+            lv_principle = wa_final-invoice_amt.
+          ELSE.
+            lv_principle = wa_final-migo_amt.
+          ENDIF.
+
+*>>>>>>>>>>>>>>>>>> GL CLEARING ADJUSTMENT >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+          IF abs( lv_gl_amt ) GT 0.
+            IF abs( lv_gl_amt ) GT lv_principle.
+              lv_gl_amt = abs( lv_gl_amt ) - lv_principle.
+              wa_final-adj_amt = lv_principle.
+              wa_final-no_day = 0.
+              lv_principle = 0.
+              wa_final-adj_ind = 'X'.
+            ELSE.
+              lv_principle -= abs( lv_gl_amt ).
+              wa_final-adj_amt = abs( lv_gl_amt ).
+              lv_gl_amt = 0.
+            ENDIF.
+          ENDIF.
+*>>>>>>>>>>>>>>>>>> GL CLEARING ADJUSTMENT >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+          lv_rate = p_rate / 100.
+          lv_time = ( wa_final-no_day - 45 ) / lv_days_interest.
+          wa_final-principle_amt = lv_principle.
+          wa_final-interest = ( lv_principle * lv_rate *  lv_time ).
+        ELSE.
+          wa_final-principle_amt = '0'.
+          wa_final-interest = '0'.
+        ENDIF.
+
+        IF wa_final-interest LT 0.
+          wa_final-interest = 0 - wa_final-interest.
+        ENDIF.
+
+        IF wa_final-doc_type EQ 'KG'.
+          wa_final-interest = 0 - wa_final-interest.
+        ENDIF.
+*>>>>>>>>>>>>>>>>>> INTEREST CALC >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+        IF wa_pos-augbl IS NOT INITIAL AND wa_final-message IS NOT INITIAL.
+          CONCATENATE 'Can be adjusted by ' wa_final-message INTO wa_final-message RESPECTING BLANKS.
+        ENDIF.
+
+        APPEND wa_final TO it_final.
+
+      ELSE.
+
+        IF lv_lines GT 1.
+          APPEND wa_final TO it_final.
+          CLEAR: wa_final-invoice_amt, wa_final-migo_doc_no, wa_final-migo_amt, wa_final-migo_date, wa_final-migo_entry.
+        ENDIF.
+
+        LOOP AT it_multi_pymt INTO DATA(wa_multi_pymt).
+          IF wa_pos-augbl IS NOT INITIAL.
+            SELECT SINGLE xtruerev
+                FROM acdoca
+                INTO lv_rev
+                WHERE rbukrs EQ p_bukrs
+                AND gjahr EQ wa_pos-gjahr
+                AND belnr EQ wa_pos-augbl.
+          ENDIF.
+          IF lv_rev EQ 'X'.
+            wa_final-pay_status = 'REVERSED'.
+          ELSE.
+            wa_final-pay_status = 'PAID'.
+          ENDIF.
+
+          wa_final-pay_doc_no = wa_multi_pymt-belnr.
+          wa_final-pay_date = wa_multi_pymt-budat.
+          wa_final-pay_amt = wa_multi_pymt-dmbtr.
+
+*>>>>>>>>>>>>>>>>>> NO OF DAYS CALC >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+          IF lv_gl_amt EQ 0.
+            IF wa_final-migo_date IS NOT INITIAL AND wa_final-pay_status NE 'REVERSED'.
+              wa_final-no_day = wa_multi_pymt-budat - wa_final-migo_date.
+            ELSE.
+              wa_final-no_day = wa_multi_pymt-budat - wa_final-migo_date.
+            ENDIF.
+          ELSE.
+            wa_final-no_day = wa_multi_pymt-budat - wa_final-miro_date.
+          ENDIF.
+*>>>>>>>>>>>>>>>>>> NO OF DAYS CALC >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+*>>>>>>>>>>>>>>>>>> INTEREST CALC >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+          IF wa_final-no_day GT 45.
+            IF wa_final-doc_type EQ 'KR'.
+              lv_principle = wa_final-invoice_amt.
+            ELSE.
+              lv_principle = wa_final-migo_amt.
+            ENDIF.
+
+*>>>>>>>>>>>>>>>>>> GL CLEARING ADJUSTMENT >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            IF abs( lv_gl_amt ) GT 0.
+              IF abs( lv_gl_amt ) GT lv_principle.
+                lv_gl_amt = abs( lv_gl_amt ) - lv_principle.
+                wa_final-adj_amt = lv_principle.
+                wa_final-no_day = 0.
+                lv_principle = 0.
+                wa_final-adj_ind = 'X'.
+              ELSE.
+                lv_principle -= abs( lv_gl_amt ).
+                wa_final-adj_amt = abs( lv_gl_amt ).
+                lv_gl_amt = 0.
+              ENDIF.
+            ENDIF.
+*>>>>>>>>>>>>>>>>>> GL CLEARING ADJUSTMENT >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+            lv_rate = p_rate / 100.
+            lv_time = ( wa_final-no_day - 45 ) / lv_days_interest.
+            wa_final-principle_amt = lv_principle.
+            wa_final-interest = ( lv_principle * lv_rate *  lv_time ).
+          ELSE.
+            wa_final-principle_amt = '0'.
+            wa_final-interest = '0'.
+          ENDIF.
+
+          IF wa_final-interest LT 0.
+            wa_final-interest = 0 - wa_final-interest.
+          ENDIF.
+
+          IF wa_final-doc_type EQ 'KG'.
+            wa_final-interest = 0 - wa_final-interest.
+          ENDIF.
+*>>>>>>>>>>>>>>>>>> INTEREST CALC >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+          CLEAR: wa_final-migo_doc_no, wa_final-migo_amt, wa_final-migo_date, wa_final-migo_entry.
+
+          APPEND wa_final TO it_final.
+          CLEAR: wa_final-pay_doc_no, wa_final-pay_date, wa_final-pay_amt.
+        ENDLOOP.
+
+      ENDIF.
+*>>>>>>>>>>>>>>>>>> PAYMENT DETAILS >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+      CLEAR: wa_final, lv_principle, lv_time, wa_pos, lv_counter, lv_lines, lv_gl_amt,
+             lv_principle, lv_sum, lv_time, wa_rem_amt, wa_migo_nos, lv_pymt_count, lv_miro_yr.
+      REFRESH: it_migo_nos.
+
+    ENDLOOP.
+
+
+*>>> fetching migos for which miro is yet to be done
+
+    wa_slopt-sign = 'I'.
+    wa_slopt-option = 'EQ'.
+    wa_slopt-low = p_budat.
+    wa_slopt-high = '00000000'.
+    APPEND wa_slopt TO s1_budat.
+    CLEAR wa_slopt.
+
+    wa_slopt-sign = 'I'.
+    wa_slopt-option = 'EQ'.
+    wa_slopt-low = p_bukrs.
+    APPEND wa_slopt TO s1_bukrs.
+    CLEAR wa_slopt.
+
+    wa_slopt-sign = 'I'.
+    wa_slopt-option = 'EQ'.
+    wa_slopt-low = wa_info-lifnr.
+    APPEND wa_slopt TO s1_lifnr.
+    CLEAR wa_slopt.
+
+    wa_slopt-sign = 'I'.
+    wa_slopt-option = 'CP'.
+    wa_slopt-low = '*'.
+    APPEND wa_slopt TO s1_werks.
+    CLEAR wa_slopt.
+
+    SUBMIT zgrir_rep_v1
+            WITH adtl EQ 'X'
+            WITH aond IN s1_budat
+            WITH s_bukrs IN s1_bukrs
+            WITH s_lifnr IN s1_lifnr
+            WITH s_werks IN s1_werks
+            AND RETURN.
+
+    IMPORT ist_final = ist_final FROM MEMORY ID 'ZMSME'.
+    FREE MEMORY ID 'ZMSME'.
+
+    LOOP AT ist_final ASSIGNING FIELD-SYMBOL(<fs>).
+      wa_final = CORRESPONDING #( wa_info ).
+      wa_final-pay_status = 'DUE'.
+      wa_final-migo_doc_no = <fs>-belnr.
+      wa_final-migo_amt = <fs>-brtwr.
+      IF <fs>-belnr IS NOT INITIAL.
+        SELECT SINGLE budat cpudt
+           FROM mkpf
+           INTO ( wa_final-migo_date, wa_final-migo_entry )
+           WHERE mblnr EQ <fs>-belnr
+           AND mjahr EQ <fs>-gjahr.
+      ENDIF.
+      IF sy-subrc EQ 4 AND wa_final-doc_type NE 'KR' AND wa_final-doc_type NE 'KA'.
+        IF wa_migo_nos-lfbnr IS NOT INITIAL.
+          SELECT SINGLE belnr
+            FROM ekbe
+            INTO wa_final-migo_doc_no
+            WHERE lfbnr EQ wa_migo_nos-lfbnr
+            AND lfgja EQ wa_migo_nos-lfgja
+            AND bewtp EQ 'E'
+            AND bwart EQ '101'.
+          SELECT SINGLE budat cpudt
+            FROM mkpf
+            INTO ( wa_final-migo_date, wa_final-migo_entry )
+            WHERE mblnr EQ wa_final-migo_doc_no
+            AND mjahr EQ wa_migo_nos-lfgja.
+          SELECT SINGLE werks
+            FROM mseg
+            INTO wa_final-bupla
+            WHERE mblnr EQ wa_final-migo_doc_no
+            AND mjahr EQ wa_migo_nos-lfgja.
+          SELECT SINGLE j_1bbranch
+            FROM t001w
+            INTO wa_final-bupla
+            WHERE werks EQ wa_final-bupla.
+        ENDIF.
+      ELSE.
+        IF <fs>-belnr IS NOT INITIAL.
+          SELECT SINGLE werks
+            FROM mseg
+            INTO wa_final-bupla
+            WHERE mblnr EQ <fs>-belnr
+            AND mjahr EQ <fs>-gjahr.
+          SELECT SINGLE j_1bbranch
+            FROM t001w
+            INTO wa_final-bupla
+            WHERE werks EQ wa_final-bupla.
+        ENDIF.
+      ENDIF.
+      wa_final-no_day = p_budat - wa_final-migo_date.
+*>>>>>>>>>>>>>>>>>> INTEREST CALC >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      IF wa_final-no_day GT 45.
+        lv_principle = wa_final-migo_amt.
+        lv_rate = p_rate / 100.
+        lv_time = ( wa_final-no_day - 45 ) / lv_days_interest.
+        wa_final-interest = ( lv_principle * lv_rate *  lv_time ).
+        wa_final-principle_amt = lv_principle.
+      ELSE.
+        wa_final-principle_amt = '0'.
+        wa_final-interest = '0'.
+      ENDIF.
+
+      IF wa_final-interest LT 0.
+        wa_final-interest = 0 - wa_final-interest.
+      ENDIF.
+*>>>>>>>>>>>>>>>>>> INTEREST CALC >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+      APPEND wa_final TO it_final.
+      CLEAR wa_final.
+    ENDLOOP.
+
+    REFRESH: ist_final, s1_budat, s1_bukrs, s1_lifnr, s1_werks.
+
+    LOOP AT it_final ASSIGNING FIELD-SYMBOL(<fss>) WHERE lifnr EQ wa_info-lifnr.
+      IF <fss>-doc_type EQ 'KR'.
+        <fss>-sort_day = <fss>-miro_date.
+      ELSE.
+        <fss>-sort_day = <fss>-migo_date.
+      ENDIF.
+    ENDLOOP.
+    UNASSIGN <fss>.
+    SORT it_final BY lifnr sort_day.
+
+
+*>>>>>>>>>>>>>>>>>> FIFO ADJUSTEMENT >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    it_rem_amt = CORRESPONDING #( FILTER #( it_pos_open WHERE konto = wa_info-lifnr ) MAPPING rem_bal = bwwrt ).
+
+    IF it_rem_amt IS NOT INITIAL.
+      LOOP AT it_final ASSIGNING FIELD-SYMBOL(<fs_final>) WHERE lifnr EQ wa_info-lifnr AND pay_status NE 'PAID' AND adj_ind NE 'X'.
+        IF it_rem_amt IS INITIAL.
+          EXIT.
+        ELSE.
+          CLEAR: <fs_final>-interest, lv_interest, <fs_final>-no_day, <fs_final>-principle_amt ,lv_principle, <fs_final>-message.
+        ENDIF.
+        IF <fs_final>-doc_type EQ 'KR' OR <fs_final>-doc_type EQ 'KG'.
+          lv_rem_amt = <fs_final>-invoice_amt.
+          lv_date = <fs_final>-miro_date.
+        ELSE.
+          lv_rem_amt = <fs_final>-migo_amt.
+          lv_date = <fs_final>-migo_date.
+        ENDIF.
+        lv_rem_amt = abs( lv_rem_amt ) - <fs_final>-adj_amt.
+
+
+        LOOP AT it_rem_amt ASSIGNING FIELD-SYMBOL(<fs_rem_amt>) WHERE adj_ind NE 'X'.
+          IF abs( lv_rem_amt ) LE 0.
+            EXIT.
+          ENDIF.
+          IF abs( lv_rem_amt ) GT <fs_rem_amt>-rem_bal.           "Bill is partially adjusted by debit note
+            lv_rem_amt = lv_rem_amt - <fs_rem_amt>-rem_bal.
+            <fs_rem_amt>-rem_bal = 0.
+            <fs_rem_amt>-adj_ind = 'X'.
+            DATA(lv_days1) = p_budat - lv_date - 45.
+            DATA(lv_days2) = <fs_rem_amt>-bldat - lv_date - 45.
+            <fs_final>-message = |{ <fs_final>-message }| & |(| & |{ <fs_rem_amt>-belnr }| & |-| & |{ <fs_rem_amt>-bldat+6(2) }| & |.| & |{ <fs_rem_amt>-bldat+4(2) }| & |.| & |{ <fs_rem_amt>-bldat+0(4) }| & |)| & |,| & | |.
+            <fs_final>-fifo_sum += <fs_rem_amt>-bwwrt.
+            <fs_final>-principle_amt = <fs_rem_amt>-bwwrt.
+            IF lines( it_rem_amt ) GT 1.
+              <fs_final>-interest += ( ( <fs_rem_amt>-bwwrt * COND #( WHEN lv_days2 LT 0 THEN 0 ELSE lv_days2 ) ) * lv_rate ) / lv_days_interest.
+              <fs_final>-no_day = |{ <fs_final>-no_day }| & |(| & |{ ( lv_days2 + 45 ) }| & |)| & |,| & | |.
+            ELSE.
+              <fs_final>-interest += ( ( <fs_rem_amt>-bwwrt * COND #( WHEN lv_days2 LT 0 THEN 0 ELSE lv_days2 ) ) * lv_rate ) / lv_days_interest.
+              <fs_final>-no_day = |{ <fs_final>-no_day }| & |(| & |{ ( lv_days2 + 45 ) }| & |)| & |,| & | |.
+            ENDIF.
+          ELSE.                                                 "Bill is fully adjusted by debit note
+            DATA(lv_days3) = <fs_rem_amt>-bldat - lv_date - 45.
+            <fs_final>-fifo_sum += <fs_rem_amt>-bwwrt.
+            <fs_final>-principle_amt = lv_rem_amt.
+            <fs_final>-message = |{ <fs_final>-message }| & |(| & |{ <fs_rem_amt>-belnr }| & |-| & |{ <fs_rem_amt>-bldat+6(2) }| & |.| & |{ <fs_rem_amt>-bldat+4(2) }| & |.| & |{ <fs_rem_amt>-bldat+0(4) }| & |)| & |,|  & | |.
+            <fs_final>-interest += ( ( lv_rem_amt * COND #( WHEN lv_days3 LT 0 THEN 0 ELSE lv_days3 ) ) * lv_rate ) / lv_days_interest.
+            <fs_final>-no_day = |{ <fs_final>-no_day }| & |(| & |{ ( lv_days3 + 45 ) }| & |)| & |,| & | |.
+            <fs_rem_amt>-rem_bal = <fs_rem_amt>-rem_bal - lv_rem_amt.
+            lv_rem_amt = 0.
+          ENDIF.
+          IF <fs_final>-interest EQ 0.
+            <fs_final>-principle_amt = 0.
+          ENDIF.
+        ENDLOOP.
+
+        DELETE it_rem_amt WHERE adj_ind EQ 'X'.
+
+        IF lv_rem_amt GT 0.
+          DATA(lv_days4) = p_budat - lv_date - 45.
+          <fs_final>-principle_amt = lv_rem_amt.
+          <fs_final>-interest += ( ( lv_rem_amt * COND #( WHEN lv_days4 LT 0 THEN 0 ELSE lv_days4 ) ) * lv_rate ) / lv_days_interest.
+          <fs_final>-no_day = |{ <fs_final>-no_day }| & |(| & |{ ( lv_days4 + 45 ) }| & |)| & |,| & | |.
+          lv_rem_amt = 0.
+        ENDIF.
+
+      ENDLOOP.
+    ENDIF.
+
+    CLEAR: it_rem_amt[], wa_rem_amt.
+*>>>>>>>>>>>>>>>>>> FIFO ADJUSTEMENT >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+  ENDLOOP.
+
+
+
+  IF lv_optimise EQ 'X'.
+    DATA: lv_lock_object TYPE c LENGTH 20 VALUE 'E_TABLE_LOCK'. " Lock object name
+
+    CALL FUNCTION 'ENQUEUE_E_TABLE_LOCK'
+      EXPORTING
+        mode_zdb_table = 'E'
+        mandt          = sy-mandt
+        field1         = ' '
+      EXCEPTIONS
+        foreign_lock   = 1
+        system_failure = 2
+        OTHERS         = 3.
+
+    IF sy-subrc = 0.
+      INSERT zmsme_vend_db FROM TABLE it_final.
+    ENDIF.
+
+    CALL FUNCTION 'DEQUEUE_E_TABLE_LOCK'
+      EXPORTING
+        mode_zdb_table = 'E'
+        mandt          = sy-mandt
+        field1         = ' '.
+
+  ENDIF.

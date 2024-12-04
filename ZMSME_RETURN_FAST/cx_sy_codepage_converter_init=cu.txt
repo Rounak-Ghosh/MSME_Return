@@ -1,0 +1,24 @@
+class CX_SY_CODEPAGE_CONVERTER_INIT definition
+  public
+  inheriting from CX_DYNAMIC_CHECK
+  final
+  create public .
+
+*"* public components of class CX_SY_CODEPAGE_CONVERTER_INIT
+*"* do not include other source files here!!!
+public section.
+
+  types TY_REPL_CHAR type SYCHAR04 .
+
+  constants CX_SY_CODEPAGE_CONVERTER_INIT type SOTR_CONC value '005056913E2F1EE890C2427975394D7D' ##NO_TEXT.
+  data SOURCE_CODEPAGE type STRING read-only .
+  data TARGET_CODEPAGE type STRING read-only .
+  data REPLACEMENT type TY_REPL_CHAR read-only .
+
+  methods CONSTRUCTOR
+    importing
+      !TEXTID like TEXTID optional
+      !PREVIOUS like PREVIOUS optional
+      !SOURCE_CODEPAGE type STRING optional
+      !TARGET_CODEPAGE type STRING optional
+      !REPLACEMENT type TY_REPL_CHAR optional .

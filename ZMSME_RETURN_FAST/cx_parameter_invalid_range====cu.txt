@@ -1,0 +1,19 @@
+class CX_PARAMETER_INVALID_RANGE definition
+  public
+  inheriting from CX_PARAMETER_INVALID
+  create public .
+
+*"* public components of class CX_PARAMETER_INVALID_RANGE
+*"* do not include other source files here!!!
+public section.
+
+  constants CX_PARAMETER_INVALID_RANGE type SOTR_CONC
+ value '9FB7E23B75B7157FE10000000A11447B' .
+  data VALUE type STRING .
+
+  methods CONSTRUCTOR
+    importing
+      !TEXTID like TEXTID optional
+      !PREVIOUS like PREVIOUS optional
+      value(PARAMETER) type STRING optional
+      value(VALUE) type STRING optional .

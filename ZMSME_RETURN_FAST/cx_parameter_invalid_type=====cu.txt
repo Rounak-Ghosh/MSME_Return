@@ -1,0 +1,19 @@
+class CX_PARAMETER_INVALID_TYPE definition
+  public
+  inheriting from CX_PARAMETER_INVALID
+  create public .
+
+*"* public components of class CX_PARAMETER_INVALID_TYPE
+*"* do not include other source files here!!!
+public section.
+
+  constants CX_PARAMETER_INVALID_TYPE type SOTR_CONC
+ value '22B7E23BEAB6167FE10000000A11447B' .
+  data TYPE type STRING .
+
+  methods CONSTRUCTOR
+    importing
+      !TEXTID like TEXTID optional
+      !PREVIOUS like PREVIOUS optional
+      value(PARAMETER) type STRING optional
+      value(TYPE) type STRING optional .

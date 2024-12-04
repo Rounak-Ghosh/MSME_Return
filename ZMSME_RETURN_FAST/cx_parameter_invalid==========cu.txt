@@ -1,0 +1,18 @@
+class CX_PARAMETER_INVALID definition
+  public
+  inheriting from CX_DYNAMIC_CHECK
+  create public .
+
+*"* public components of class CX_PARAMETER_INVALID
+*"* do not include other source files here!!!
+public section.
+
+  constants CX_PARAMETER_INVALID type SOTR_CONC
+ value '06690F3C8163FF17E10000000A11447B' .
+  data PARAMETER type STRING .
+
+  methods CONSTRUCTOR
+    importing
+      !TEXTID like TEXTID optional
+      !PREVIOUS like PREVIOUS optional
+      value(PARAMETER) type STRING optional .
