@@ -50,6 +50,7 @@
             WITH x_shbv   EQ 'X'
             AND RETURN.
 
+    COMMIT WORK AND WAIT.
     IMPORT it_pos = it_pos FROM MEMORY ID 'ZFBL1N'.
     DELETE it_pos WHERE bupla EQ 'KFOT'.
 
@@ -73,7 +74,7 @@
               WITH x_norm   EQ 'X'
               WITH x_shbv   EQ 'X'
               AND RETURN.
-
+    COMMIT WORK AND WAIT.
 *   Contains all items - open + cleared upto ason date
     IMPORT it_pos = it_pos FROM MEMORY ID 'ZFBL1N'.
     DELETE it_pos WHERE bupla EQ 'KFOT'.
@@ -83,12 +84,20 @@
     DELETE it_pos_open WHERE ( blart NE 'KZ' AND blart NE 'KG' ).
     DELETE it_pos_open WHERE sym_augp NE 'U'.
 
+**   Keeping only cleared items for date range
+*    DELETE it_pos WHERE sym_augp EQ 'U'.
+*    IF p_budat+4(4) GE '0401' AND p_budat+4(4) LE '0930'.
+*      DELETE it_pos WHERE ( budat LT lv_low OR budat GT lv_high ).
+*    ELSE.
+*      DELETE it_pos WHERE ( budat LT lv_low OR budat GT lv_high ).
+*    ENDIF.
+
 *   Keeping only cleared items for date range
-    DELETE it_pos WHERE sym_augp EQ 'U'.
+*    DELETE it_pos WHERE sym_augp EQ 'U'.
     IF p_budat+4(4) GE '0401' AND p_budat+4(4) LE '0930'.
-      DELETE it_pos WHERE ( budat LT lv_low OR budat GT lv_high ).
+      DELETE it_pos WHERE ( budat LT lv_low OR budat GT lv_high ) AND sym_augp EQ 'E'.
     ELSE.
-      DELETE it_pos WHERE ( budat LT lv_low OR budat GT lv_high ).
+      DELETE it_pos WHERE ( budat LT lv_low OR budat GT lv_high ) AND sym_augp EQ 'E'.
     ENDIF.
 
     DELETE it_pos WHERE blart NE 'RE' AND blart NE 'KR' AND blart NE 'KA'.
@@ -106,24 +115,32 @@
   ENDIF.
 
   LOOP AT it_pos INTO wa_pos WHERE blart EQ 'KA' OR blart EQ 'RE'.
-    SELECT SINGLE stblg
-          FROM bkpf
-          INTO @DATA(is_rev)
-          WHERE bukrs EQ @p_bukrs
-          AND gjahr EQ @wa_pos-gjahr
-          AND belnr EQ @wa_pos-belnr.
-    SELECT SINGLE xreversed
-          FROM bkpf
-          INTO @DATA(is_rev1)
-          WHERE bukrs EQ @p_bukrs
-          AND gjahr EQ @wa_pos-gjahr
-          AND belnr EQ @wa_pos-belnr.
-    SELECT SINGLE xreversing
-          FROM bkpf
-          INTO @DATA(is_rev2)
-          WHERE bukrs EQ @p_bukrs
-          AND gjahr EQ @wa_pos-gjahr
-          AND belnr EQ @wa_pos-belnr.
+*    SELECT SINGLE stblg
+*          FROM bkpf
+*          INTO @DATA(is_rev)
+*          WHERE bukrs EQ @p_bukrs
+*          AND gjahr EQ @wa_pos-gjahr
+*          AND belnr EQ @wa_pos-belnr.
+*    SELECT SINGLE xreversed
+*          FROM bkpf
+*          INTO @DATA(is_rev1)
+*          WHERE bukrs EQ @p_bukrs
+*          AND gjahr EQ @wa_pos-gjahr
+*          AND belnr EQ @wa_pos-belnr.
+*    SELECT SINGLE xreversing
+*          FROM bkpf
+*          INTO @DATA(is_rev2)
+*          WHERE bukrs EQ @p_bukrs
+*          AND gjahr EQ @wa_pos-gjahr
+*          AND belnr EQ @wa_pos-belnr.
+
+    SELECT SINGLE stblg, xreversed, xreversing
+      FROM bkpf
+      INTO (@DATA(is_rev), @DATA(is_rev1), @DATA(is_rev2))
+      WHERE bukrs EQ @p_bukrs
+      AND gjahr EQ @wa_pos-gjahr
+      AND belnr EQ @wa_pos-belnr.
+
     IF is_rev IS NOT INITIAL OR is_rev1 IS NOT INITIAL OR is_rev2 IS NOT INITIAL.
       DELETE it_pos WHERE belnr EQ wa_pos-belnr.
     ENDIF.
@@ -131,7 +148,6 @@
   ENDLOOP.
 
   SORT it_pos BY budat bldat.
-
 
 
   LOOP AT it_info INTO wa_info.
@@ -170,7 +186,7 @@
       ENDIF.
 
       IF wa_final-miro_no IS NOT INITIAL.
-        SELECT r~lfbnr, r~lfgja, r~wrbtr, r~belnr, m~budat
+        SELECT r~lfbnr, r~lfgja, r~wrbtr, r~belnr, r~buzei, m~budat
           FROM rseg AS r
           INNER JOIN mkpf AS m
           ON r~lfbnr = m~mblnr
@@ -182,27 +198,37 @@
           ORDER BY m~budat.
 
         IF sy-subrc EQ 4.
-          SELECT r~lfbnr, r~lfgja, r~wrbtr, r~belnr, m~budat
+          SELECT DISTINCT r~lfbnr, r~lfgja, r~wrbtr, r~belnr, r~buzei, e~budat
             FROM rseg AS r
             INNER JOIN ekbe AS e
             ON r~lfbnr = e~lfbnr
-            AND r~lfgja = e~lfgja
-            AND bewtp EQ 'E'
-            AND bwart EQ '101'
-            INNER JOIN mkpf AS m
-            ON e~belnr = m~mblnr
-            AND e~gjahr = m~mjahr
+*            AND r~lfgja = e~lfgja
+            AND r~ebelp = e~ebelp
+*            AND bewtp EQ 'E'
+*            AND bwart EQ '101'
+*            INNER JOIN mkpf AS m
+*            INNER JOIN matdoc AS m
+*            ON e~belnr = m~mblnr
+*            AND e~gjahr = m~gjahr
             INTO TABLE @it_migo_nos
             WHERE r~belnr EQ @wa_final-miro_no
             AND r~gjahr EQ @lv_miro_yr
             AND r~bukrs EQ @p_bukrs
-            ORDER BY m~budat.
+            AND r~lfbnr IS NOT NULL
+            ORDER BY e~budat.
+
+          SORT it_migo_nos BY wrbtr belnr buzei.
+          DELETE ADJACENT DUPLICATES FROM it_migo_nos COMPARING wrbtr belnr buzei.
+          IF sy-subrc EQ 0.
+            CONCATENATE lv_err_msg ' ' wa_final-miro_no INTO lv_err_msg RESPECTING BLANKS.
+          ENDIF.
         ENDIF.
       ENDIF.
 
 *>>> pursing multiple lines of migo
-
-      DELETE ADJACENT DUPLICATES FROM it_migo_nos COMPARING lfbnr wrbtr.  "belnr
+*      DELETE it_migo_nos WHERE lfbnr IS INITIAL.
+      SORT it_migo_nos BY lfbnr wrbtr buzei.
+      DELETE ADJACENT DUPLICATES FROM it_migo_nos COMPARING lfbnr wrbtr buzei.
       DESCRIBE TABLE it_migo_nos LINES DATA(lv_lines).
       CLEAR lv_counter.
       IF lv_lines GT 1.
@@ -294,6 +320,7 @@
 
             lv_rate = p_rate / 100.
             lv_time = ( wa_final-no_day - 45 ) / lv_days_interest.
+*            wa_final-interest = ( lv_principle * ( 1 + lv_rate ) ** lv_time ) - lv_principle.
             wa_final-interest = ( lv_principle * lv_rate *  lv_time ).
             wa_final-principle_amt = lv_principle.
           ELSE.
@@ -333,7 +360,7 @@
               WHERE mblnr EQ wa_migo_nos-lfbnr
               AND mjahr EQ wa_migo_nos-lfgja.
         ENDIF.
-        IF sy-subrc EQ 4  AND wa_final-doc_type NE 'KR' AND wa_final-doc_type NE 'KG' AND wa_final-doc_type NE 'KA'.
+        IF sy-subrc EQ 4 AND wa_final-doc_type NE 'KR' AND wa_final-doc_type NE 'KG' AND wa_final-doc_type NE 'KA'.
           IF wa_migo_nos-lfbnr IS NOT INITIAL.
             SELECT SINGLE belnr
               FROM ekbe
@@ -490,6 +517,7 @@
 
           lv_rate = p_rate / 100.
           lv_time = ( wa_final-no_day - 45 ) / lv_days_interest.
+*          wa_final-interest = ( lv_principle * ( 1 + lv_rate ) ** lv_time ) - lv_principle.
           wa_final-principle_amt = lv_principle.
           wa_final-interest = ( lv_principle * lv_rate *  lv_time ).
         ELSE.
@@ -576,6 +604,7 @@
 
             lv_rate = p_rate / 100.
             lv_time = ( wa_final-no_day - 45 ) / lv_days_interest.
+*            wa_final-interest = ( lv_principle * ( 1 + lv_rate ) ** lv_time ) - lv_principle.
             wa_final-principle_amt = lv_principle.
             wa_final-interest = ( lv_principle * lv_rate *  lv_time ).
           ELSE.
@@ -635,7 +664,7 @@
     APPEND wa_slopt TO s1_werks.
     CLEAR wa_slopt.
 
-    SUBMIT zgrir_rep_v1
+    SUBMIT zgrir_rep_v1_copy
             WITH adtl EQ 'X'
             WITH aond IN s1_budat
             WITH s_bukrs IN s1_bukrs
@@ -643,6 +672,7 @@
             WITH s_werks IN s1_werks
             AND RETURN.
 
+    COMMIT WORK AND WAIT.
     IMPORT ist_final = ist_final FROM MEMORY ID 'ZMSME'.
     FREE MEMORY ID 'ZMSME'.
 
@@ -701,6 +731,7 @@
         lv_principle = wa_final-migo_amt.
         lv_rate = p_rate / 100.
         lv_time = ( wa_final-no_day - 45 ) / lv_days_interest.
+*            wa_final-interest = ( lv_principle * ( 1 + lv_rate ) ** lv_time ) - lv_principle.
         wa_final-interest = ( lv_principle * lv_rate *  lv_time ).
         wa_final-principle_amt = lv_principle.
       ELSE.
@@ -760,23 +791,27 @@
             <fs_rem_amt>-adj_ind = 'X'.
             DATA(lv_days1) = p_budat - lv_date - 45.
             DATA(lv_days2) = <fs_rem_amt>-bldat - lv_date - 45.
-            <fs_final>-message = |{ <fs_final>-message }| & |(| & |{ <fs_rem_amt>-belnr }| & |-| & |{ <fs_rem_amt>-bldat+6(2) }| & |.| & |{ <fs_rem_amt>-bldat+4(2) }| & |.| & |{ <fs_rem_amt>-bldat+0(4) }| & |)| & |,| & | |.
+            <fs_final>-message = |{ <fs_final>-message }| & |{ <fs_rem_amt>-belnr }| & |-| & |{ <fs_rem_amt>-bldat+6(2) }| & |.| & |{ <fs_rem_amt>-bldat+4(2) }| & |.| & |{ <fs_rem_amt>-bldat+0(4) }| & |,| & | |.
             <fs_final>-fifo_sum += <fs_rem_amt>-bwwrt.
             <fs_final>-principle_amt = <fs_rem_amt>-bwwrt.
+*            <fs_final>-no_day = |{ <fs_final>-no_day }| & |(| & |{ lv_days1 }| & | & | & |{ lv_days2 }| & |)| & |,| & | |.
             IF lines( it_rem_amt ) GT 1.
               <fs_final>-interest += ( ( <fs_rem_amt>-bwwrt * COND #( WHEN lv_days2 LT 0 THEN 0 ELSE lv_days2 ) ) * lv_rate ) / lv_days_interest.
-              <fs_final>-no_day = |{ <fs_final>-no_day }| & |(| & |{ ( lv_days2 + 45 ) }| & |)| & |,| & | |.
+              <fs_final>-no_day = |{ <fs_final>-no_day }| & |{ ( lv_days2 + 45 ) }| & |,| & | |.
             ELSE.
+*              <fs_final>-interest += ( ( lv_rem_amt * COND #( WHEN lv_days1 LT 0 THEN 0 ELSE lv_days1 )
+*                                  + <fs_rem_amt>-bwwrt * COND #( WHEN lv_days2 LT 0 THEN 0 ELSE lv_days2 ) ) * lv_rate ) / lv_days_interest .
               <fs_final>-interest += ( ( <fs_rem_amt>-bwwrt * COND #( WHEN lv_days2 LT 0 THEN 0 ELSE lv_days2 ) ) * lv_rate ) / lv_days_interest.
-              <fs_final>-no_day = |{ <fs_final>-no_day }| & |(| & |{ ( lv_days2 + 45 ) }| & |)| & |,| & | |.
+*              <fs_final>-no_day = |{ <fs_final>-no_day }| & |(| & |{ ( lv_days1 + 45 ) }| & | & | & |{ ( lv_days2 + 45 ) }| & |)| & |,| & | |.
+              <fs_final>-no_day = |{ <fs_final>-no_day }| & |{ ( lv_days2 + 45 ) }| & |,| & | |.
             ENDIF.
           ELSE.                                                 "Bill is fully adjusted by debit note
             DATA(lv_days3) = <fs_rem_amt>-bldat - lv_date - 45.
             <fs_final>-fifo_sum += <fs_rem_amt>-bwwrt.
             <fs_final>-principle_amt = lv_rem_amt.
-            <fs_final>-message = |{ <fs_final>-message }| & |(| & |{ <fs_rem_amt>-belnr }| & |-| & |{ <fs_rem_amt>-bldat+6(2) }| & |.| & |{ <fs_rem_amt>-bldat+4(2) }| & |.| & |{ <fs_rem_amt>-bldat+0(4) }| & |)| & |,|  & | |.
+            <fs_final>-message = |{ <fs_final>-message }| & |{ <fs_rem_amt>-belnr }| & |-| & |{ <fs_rem_amt>-bldat+6(2) }| & |.| & |{ <fs_rem_amt>-bldat+4(2) }| & |.| & |{ <fs_rem_amt>-bldat+0(4) }| & |,|  & | |.
             <fs_final>-interest += ( ( lv_rem_amt * COND #( WHEN lv_days3 LT 0 THEN 0 ELSE lv_days3 ) ) * lv_rate ) / lv_days_interest.
-            <fs_final>-no_day = |{ <fs_final>-no_day }| & |(| & |{ ( lv_days3 + 45 ) }| & |)| & |,| & | |.
+            <fs_final>-no_day = |{ <fs_final>-no_day }| & |{ ( lv_days3 + 45 ) }| & |,| & | |.
             <fs_rem_amt>-rem_bal = <fs_rem_amt>-rem_bal - lv_rem_amt.
             lv_rem_amt = 0.
           ENDIF.
@@ -791,7 +826,7 @@
           DATA(lv_days4) = p_budat - lv_date - 45.
           <fs_final>-principle_amt = lv_rem_amt.
           <fs_final>-interest += ( ( lv_rem_amt * COND #( WHEN lv_days4 LT 0 THEN 0 ELSE lv_days4 ) ) * lv_rate ) / lv_days_interest.
-          <fs_final>-no_day = |{ <fs_final>-no_day }| & |(| & |{ ( lv_days4 + 45 ) }| & |)| & |,| & | |.
+          <fs_final>-no_day = |{ <fs_final>-no_day }| & |{ ( lv_days4 + 45 ) }| & |,| & | |.
           lv_rem_amt = 0.
         ENDIF.
 
@@ -803,29 +838,26 @@
 
   ENDLOOP.
 
-
-
   IF lv_optimise EQ 'X'.
-    DATA: lv_lock_object TYPE c LENGTH 20 VALUE 'E_TABLE_LOCK'. " Lock object name
-
-    CALL FUNCTION 'ENQUEUE_E_TABLE_LOCK'
-      EXPORTING
-        mode_zdb_table = 'E'
-        mandt          = sy-mandt
-        field1         = ' '
-      EXCEPTIONS
-        foreign_lock   = 1
-        system_failure = 2
-        OTHERS         = 3.
-
-    IF sy-subrc = 0.
+    CLEAR wa_final.
+    lv_counter = 0.
+    LOOP AT it_final ASSIGNING FIELD-SYMBOL(<fssss>).
+      lv_counter += 1.
+      <fssss>-slno = lv_counter.
+    ENDLOOP.
+    IF it_final IS NOT INITIAL.
       INSERT zmsme_vend_db FROM TABLE it_final.
+      COMMIT WORK AND WAIT.
+      IF sy-subrc EQ 0.
+        MESSAGE 'Table updated!' TYPE 'S'.
+      ELSE.
+        MESSAGE 'Table could not be updated!' TYPE 'E'.
+      ENDIF.
     ENDIF.
+  ENDIF.
 
-    CALL FUNCTION 'DEQUEUE_E_TABLE_LOCK'
-      EXPORTING
-        mode_zdb_table = 'E'
-        mandt          = sy-mandt
-        field1         = ' '.
-
+  IF lv_err_msg IS NOT INITIAL.
+    CONCATENATE 'Miro Nos: ' lv_err_msg ' have some mistakes' INTO lv_err_msg RESPECTING BLANKS.
+    MESSAGE lv_err_msg TYPE 'I' DISPLAY LIKE 'E'.
+    CLEAR lv_err_msg.
   ENDIF.
